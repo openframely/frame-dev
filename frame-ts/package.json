@@ -1,0 +1,17 @@
+{
+  "name": "@framely/frame-ts",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "typescript": "^5.5.2"
+  },
+  "dependencies": {
+    "@abandonware/noble": "^1.9.2-25"
+  },
+  "files": [
+    "**/**.d.ts"
+  ],
+  "types": "index.d.ts"
+}
