@@ -1,0 +1,16 @@
+{
+  "name": "@framely/frame-tests",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "tstl",
+    "dev": "tstl --watch"
+  },
+  "devDependencies": {
+    "lua-types": "^2.13.1",
+    "typescript": "^5.5.2",
+    "typescript-to-lua": "^1.26.0",
+    "@framely/frame-ts": "^1.0.0"
+  }
+}

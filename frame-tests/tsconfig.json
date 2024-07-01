@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/TypeScriptToLua/TypeScriptToLua/master/tsconfig-schema.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "moduleResolution": "Node",
+    "types": ["lua-types/5.4","@typescript-to-lua/language-extensions", "@framely/frame-ts"],
+    "strict": true
+  },
+  "tstl": {
+    "luaTarget": "5.4",
+    "noHeader": true,
+    "sourceMapTraceback": true,
+    "luaLibImport": "require-minimal"
+  }
+}
