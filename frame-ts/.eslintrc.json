@@ -1,0 +1,98 @@
+{
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/strict",
+    "plugin:@typescript-eslint/stylistic",
+    "plugin:import/recommended",
+    "plugin:import/typescript",
+    "plugin:perfectionist/recommended-natural",
+    "plugin:prettier/recommended"
+  ],
+  "plugins": [
+    "@typescript-eslint",
+    "import",
+    "perfectionist",
+    "etc",
+    "unicorn"
+  ],
+  "rules": {
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      {
+        "vars": "all",
+        "args": "after-used",
+        "ignoreRestSiblings": false
+      }
+    ],
+    "prettier/prettier": [
+      "error",
+      {
+        "endOfLine": "auto"
+      }
+    ],
+    "perfectionist/sort-imports": [
+      "error",
+      {
+        "type": "natural",
+        "order": "asc",
+        "groups": [
+          "type",
+          "side-effect",
+          [
+            "builtin",
+            "external"
+          ],
+          "internal-type",
+          "internal",
+          [
+            "parent-type",
+            "sibling-type",
+            "index-type"
+          ],
+          [
+            "parent",
+            "sibling",
+            "index"
+          ],
+          "style",
+          "object",
+          "unknown"
+        ],
+        "newlines-between": "never",
+        "internal-pattern": [
+          "@/**"
+        ]
+      }
+    ],
+    "etc/no-commented-out-code": "error",
+    "unicorn/filename-case": [
+      "error",
+      {
+        "case": "kebabCase"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "*.ts"
+      ],
+      "parser": "@typescript-eslint/parser",
+      "parserOptions": {
+        "project": [
+          "./tsconfig.json"
+        ]
+      }
+    },
+    {
+      "files": [
+        "*.js"
+      ]
+    }
+  ],
+  "ignorePatterns": [
+    "!**/*",
+    "node_modules/**/*",
+    "*.config.*"
+  ]
+}
