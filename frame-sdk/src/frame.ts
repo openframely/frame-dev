@@ -7,20 +7,41 @@ import { IMU } from "imu";
 import { Microphone } from "microphone";
 import { Time } from "time";
 
-// 7a230001-5475-a6a4-654c-8431f6ad49c4
+/**
+ * The unique identifier for a Frame.
+ * '7a230001-5475-a6a4-654c-8431f6ad49c4'
+ *
+ * @type {string}
+ * @constant
+ */
 const FRAME_UUID = "7a2300015475a6a4654c8431f6ad49c4";
 
-// 7a230002-5475-a6a4-654c-8431f6ad49c4
+/**
+ * The universally unique identifier (UUID) for the TX characteristic.
+ * '7a230002-5475-a6a4-654c-8431f6ad49c4'
+ * @type {string}
+ */
 const TX_CHARACTERISTIC_UUID = "7a2300025475a6a4654c8431f6ad49c4";
 
-// 7a230003-5475-a6a4-654c-8431f6ad49c4
+/**
+ * The UUID for the RX characteristic.
+ *
+ * '7a230003-5475-a6a4-654c-8431f6ad49c4'
+ *
+ * @type {string}
+ */
 const RX_CHARACTERISTIC_UUID = "7a2300035475a6a4654c8431f6ad49c4";
 
+/**
+ * Represents a Frame object that provides access to various functionalities of the Frame device.
+ */
 export class Frame {
   bluetooth: Bluetooth = new Bluetooth();
   camera: Camera = new Camera();
-  display: Display = new Display();
+  connected = false;
 
+  discovered = false;
+  display: Display = new Display(this);
   file: RemoteFileSystem = new RemoteFileSystem();
   imu: IMU = new IMU();
   microphone: Microphone = new Microphone();
@@ -29,13 +50,38 @@ export class Frame {
   time: Time = new Time();
   tx: Characteristic | undefined = undefined;
 
-  battery_level(): number {
-    return send_lua("print(frame.battery.level())", pri) as number;
+  /**
+   * Retrieves the battery level of the frame device.
+   *
+   * This method sends a request to the frame device to get the current battery level.
+   * It awaits the response, which is expected to be a string that can be parsed into a number.
+   * If no data is received in response to the request, it throws an error indicating that no data was received.
+   *
+   * @returns {Promise<number>} A promise that resolves to the battery level as a number.
+   * @throws {Error} Throws an error if no data is received in response to the battery level request.
+   */
+  async battery_level(): Promise<number> {
+    const data = await this.request("print(frame.battery_level())", true);
+    if (!data) {
+      throw new Error("No data received");
+    }
+    return parseFloat(data.toString());
   }
 
+  /**
+   * Initiates a connection to a Frame device within a specified timeout.
+   *
+   * This method attempts to connect to a Frame device by scanning for available devices and
+   * establishing a connection with the first discovered device. It uses a countdown mechanism
+   * to limit the connection attempt duration. If the connection is not established within the
+   * specified timeout period, the method returns false to indicate failure.
+   *
+   * @param {number} timeout - The maximum time (in seconds) to attempt a connection before giving up.
+   * @returns {Promise<boolean>} A promise that resolves to true if the connection was successful, or false if it timed out.
+   *
+   * TODO: Clean up the connect method to make it more readable and maintainable.
+   */
   async connect(timeout = 30): Promise<boolean> {
-    let discovered = false;
-    let connected = false;
     let intervalHandle: NodeJS.Timeout | undefined;
 
     function sleep(ms: number) {
@@ -68,7 +114,7 @@ export class Frame {
       console.log(
         `Connected to '${peripheral.advertisement.localName}' ${peripheral.id}`,
       );
-      connected = true;
+      this.connected = true;
 
       const servicesAndCharacteristics =
         await peripheral.discoverAllServicesAndCharacteristicsAsync();
@@ -80,6 +126,11 @@ export class Frame {
       }
       if (this.rx) {
         console.log("RX Characteristic found");
+        await this.rx.notifyAsync(true);
+
+        this.rx?.on("data", (data) => {
+          console.log(`Received data: ${data.toString()}`);
+        });
       }
     };
 
@@ -97,7 +148,7 @@ export class Frame {
       this.peripheral = peripheral;
 
       // connect to the first peripheral that is scanned
-      discovered = true;
+      this.discovered = true;
 
       noble.stopScanning();
       const name = peripheral.advertisement.localName;
@@ -108,38 +159,95 @@ export class Frame {
     });
 
     await sleep(timeout * 1000);
-    if (!discovered) {
+    if (!this.discovered) {
       noble.stopScanning();
       console.log("No Frame found");
       return false;
     }
 
-    return connected;
+    return this.connected;
   }
 
+  /**
+   * Asynchronously disconnects from the Frame device and stops scanning for BLE devices.
+   *
+   * This method first checks if there is a currently connected peripheral device. If so, it
+   * initiates an asynchronous disconnection process. Regardless of the connection status, it
+   * then proceeds to asynchronously stop the BLE scanning process. This is essential for
+   * cleaning up resources and ensuring the application does not continue to search for devices
+   * after it has been instructed to disconnect.
+   *
+   * Note: The line `//noble._bindings.stop();` is commented out, indicating that direct
+   * manipulation of the noble bindings was considered but is not currently in use. This could
+   * be for cleanup purposes or to prevent potential issues with the BLE adapter state.
+   *
+   * @returns {Promise<void>} A promise that resolves once the disconnection and the stopping
+   * of scanning have been completed.
+   */
   async disconnect(): Promise<void> {
     if (this.peripheral) {
       await this.peripheral.disconnectAsync();
     }
     await noble.stopScanningAsync();
-    noble.removeAllListeners();
-    noble._bindings.stop();
+    //noble._bindings.stop();
   }
 
   fpga_ready(address: number, num_bytes: number): Uint8Array {
     return new Uint8Array(0);
   }
 
-  send_lua(str: string, show_me = false, await_print = false): void {
-    if (show_me) {
+  receive_data(): Uint8Array | undefined {
+    this.rx?.readAsync().then((data) => {
+      console.log(`Received data: ${data.toString()}`);
+      return data.valueOf();
+    });
+
+    return undefined;
+  }
+
+  /**
+   * Sends a request to the Frame device and awaits its response.
+   *
+   * This method is responsible for sending a request to the Frame device. It first logs the request if `echo` is true,
+   * indicating that the request should be echoed to the console for debugging purposes. It then sends the request
+   * using the TX characteristic of the device. The method waits for a response from the RX characteristic, logging
+   * the received data or any errors encountered during the read operation. The response is returned as a `Buffer`
+   * if successful, or `undefined` if an error occurs or no data is received.
+   *
+   * @param {string} str - The request string to be sent to the Frame device.
+   * @param {boolean} [echo=false] - Whether to log the request to the console.
+   * @returns {Promise<Buffer | undefined>} A promise that resolves with the response from the Frame device as a Buffer,
+   * or undefined if an error occurs or no data is received.
+   */
+  async request(str: string, echo = false): Promise<Buffer | undefined> {
+    if (echo) {
+      console.log(`Sending Lua request: ${str}`);
+    }
+
+    await this.tx?.writeAsync(Buffer.from(str, "utf8"), false);
+
+    return new Promise((resolve) => {
+      const interval = setInterval(() => {
+        console.log("Reading data");
+        this.rx?.read((error, data) => {
+          if (error) {
+            console.error(`Error reading data: ${error}`);
+          }
+          console.log(`Received response: ${data?.toString()}`);
+          clearInterval(interval);
+          resolve(data);
+        });
+      }, 500);
+    });
+  }
+
+  async send(str: string, echo = false): Promise<boolean> {
+    if (echo) {
       console.log(`Sending Lua: ${str}`);
     }
 
-    this.tx?.write(Buffer.from(str), false, (error) => {
-      if (error) {
-        console.error(`Error writing to TX: ${error}`);
-      }
-    });
+    await this.tx?.writeAsync(Buffer.from(str, "utf8"), true);
+    return true;
   }
 
   sleep(seconds: Ref<number> | null | number): void {
@@ -154,12 +262,50 @@ export class Frame {
     console.log("Updating");
   }
 
-  get FRAME_VERSION(): string {
-    return "0.0.1";
+  /**
+   * Asynchronously retrieves the firmware version of the Frame device.
+   *
+   * This property getter executes an asynchronous function that sends a request to the Frame device
+   * to retrieve the current firmware version. The firmware version is expected to be a string that
+   * identifies the version of the firmware running on the device. If the request is successful, the
+   * method returns the firmware version as a string. In case of any error during the request, it
+   * returns an empty string as a fallback value.
+   *
+   * @returns {Promise<string | undefined>} A promise that resolves to the firmware version as a string,
+   * or undefined if the request fails.
+   */
+  get FIRMWARE_VERSION(): Promise<string | undefined> {
+    return (async () => {
+      try {
+        const data = await this.request("print(frame.FIRMWARE_VERSION)", true);
+        return data?.toString();
+      } catch (e) {
+        return ""; // fallback value
+      }
+    })();
   }
 
-  get GIT_TAG(): string {
-    return "v0.0.1";
+  /**
+   * Asynchronously retrieves the GIT tag of the Frame device.
+   *
+   * This getter method executes an asynchronous function that sends a request to the Frame device
+   * to retrieve the current GIT tag. The GIT tag is expected to be a string that identifies the
+   * git commit of the firmware running on the device. If the request is successful, the method
+   * returns the GIT tag as a string. In case of any error during the request, it returns an empty
+   * string as a fallback value.
+   *
+   * @returns {Promise<string | undefined>} A promise that resolves to the GIT tag as a string, or
+   * undefined if the request fails.
+   */
+  get GIT_TAG(): Promise<string | undefined> {
+    return (async () => {
+      try {
+        const data = await this.request("print(frame.GIT_TAG)", true);
+        return data?.toString();
+      } catch (e) {
+        return ""; // fallback value
+      }
+    })();
   }
 }
 
