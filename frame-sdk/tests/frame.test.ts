@@ -1,4 +1,4 @@
-import { Frame } from "@framely/sdk/frame";
+import { Frame } from "frame";
 
 const frame: Frame = new Frame();
 
@@ -36,6 +36,11 @@ it("can retrieve git tag", async () => {
 });
 
 it("can display text", async () => {
-  await frame.display.text("Hello, world!", 50, 140);
+  await frame.display.text("Hello, Zay", 50, 140);
   await frame.display.show();
+});
+
+it("can list directory contents", async () => {
+  const contents = await frame.file.listdir("/");
+  expect(contents.length).toBeGreaterThan(0);
 });

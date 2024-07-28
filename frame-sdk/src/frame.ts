@@ -1,4 +1,5 @@
 import noble, { Characteristic, Peripheral } from "@abandonware/noble";
+import { Accumulator } from "accumulator";
 import { Bluetooth } from "bluetooth";
 import { Camera } from "camera";
 import { Display } from "display";
@@ -36,15 +37,18 @@ const RX_CHARACTERISTIC_UUID = "7a2300035475a6a4654c8431f6ad49c4";
  * Represents a Frame object that provides access to various functionalities of the Frame device.
  */
 export class Frame {
+  accumulator: Accumulator = new Accumulator();
   bluetooth: Bluetooth = new Bluetooth();
   camera: Camera = new Camera();
   connected = false;
 
   discovered = false;
   display: Display = new Display(this);
-  file: RemoteFileSystem = new RemoteFileSystem();
+
+  file: RemoteFileSystem = new RemoteFileSystem(this);
   imu: IMU = new IMU();
   microphone: Microphone = new Microphone();
+
   peripheral: Peripheral | undefined = undefined;
   rx: Characteristic | undefined = undefined;
   time: Time = new Time();
@@ -84,7 +88,7 @@ export class Frame {
   async connect(timeout = 30): Promise<boolean> {
     let intervalHandle: NodeJS.Timeout | undefined;
 
-    function sleep(ms: number) {
+    function sleep() {
       return new Promise<void>((resolve) => {
         intervalHandle = setInterval(() => {
           console.log("Timeout: ", timeout);
@@ -129,7 +133,8 @@ export class Frame {
         await this.rx.notifyAsync(true);
 
         this.rx?.on("data", (data) => {
-          console.log(`Received data: ${data.toString()}`);
+          console.log(`Received data (rx): ${data.toString()}`);
+          this.accumulator.accumulate(data.valueOf());
         });
       }
     };
@@ -158,7 +163,7 @@ export class Frame {
       });
     });
 
-    await sleep(timeout * 1000);
+    await sleep();
     if (!this.discovered) {
       noble.stopScanning();
       console.log("No Frame found");
@@ -189,11 +194,43 @@ export class Frame {
       await this.peripheral.disconnectAsync();
     }
     await noble.stopScanningAsync();
-    //noble._bindings.stop();
+    // eslint-disable-next-line etc/no-commented-out-code
+    noble._bindings.stop();
   }
 
-  fpga_ready(address: number, num_bytes: number): Uint8Array {
+  async expect(str: string, num: number): Promise<string[]> {
+    const result: string[] = [];
+    this.accumulator.expect(num);
+    await this.request(str);
+    for await (const chunk of this.accumulator) {
+      if (chunk) {
+        result.push(chunk.toString());
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+
+  fpga_read(address: number, num_bytes: number): Uint8Array {
     return new Uint8Array(0);
+  }
+
+  async read(): Promise<Buffer | undefined> {
+    return new Promise((resolve, reject) => {
+      const interval = setInterval(() => {
+        console.log("Reading data");
+        this.rx?.read((error, data) => {
+          if (error) {
+            console.error(`Error reading data: ${error}`);
+            reject();
+          }
+          console.log(`Received response: ${data?.toString()}`);
+          clearInterval(interval);
+          resolve(data);
+        });
+      }, 500);
+    });
   }
 
   receive_data(): Uint8Array | undefined {
@@ -241,6 +278,17 @@ export class Frame {
     });
   }
 
+  /**
+   * Sends a Lua command to the Frame device.
+   *
+   * This method sends a Lua command to the Frame device using the TX characteristic. It logs the command if `echo`
+   * is true, indicating that the command should be echoed to the console for debugging purposes. The method awaits
+   * the completion of the write operation and returns true if the operation is successful.
+   *
+   * @param {string} str - The Lua command to be sent to the Frame device.
+   * @param {boolean} [echo=false] - Whether to log the Lua command to the console.
+   * @returns {Promise<boolean>} A promise that resolves to true if the Lua command is successfully sent.
+   */
   async send(str: string, echo = false): Promise<boolean> {
     if (echo) {
       console.log(`Sending Lua: ${str}`);
@@ -250,16 +298,43 @@ export class Frame {
     return true;
   }
 
-  sleep(seconds: Ref<number> | null | number): void {
-    console.log("Sleeping");
+  /**
+   * Puts the Frame device to sleep for a specified duration.
+   * @param seconds
+   */
+  async sleep(seconds: number): Promise<void> {
+    await this.send(`frame.sleep(${seconds})`);
   }
 
-  stay_awake(enable: boolean): void {
-    console.log("Staying awake");
+  /**
+   * Asynchronously sets the Frame device's sleep mode state.
+   *
+   * This method controls the sleep mode of the Frame device by sending a command to either
+   * enable or disable the sleep mode. The command is sent using the `send` method, which
+   * transmits the command to the device via the TX characteristic. The method awaits the
+   * completion of the command transmission, ensuring that the sleep mode state is set as
+   * requested.
+   *
+   * @param {boolean} enable - A boolean value where `true` enables sleep mode and `false` disables it.
+   * @returns {Promise<void>} A promise that resolves once the command to set the sleep mode state has been sent.
+   */
+  async stay_awake(enable: boolean): Promise<void> {
+    await this.send(`frame.stay_awake(${enable})`);
   }
 
-  update() {
-    console.log("Updating");
+  /**
+   * Asynchronously updates the Frame device.
+   *
+   * This method sends a command to the Frame device to initiate its update process. The command is sent
+   * using the `send` method, which transmits the command to the device via the TX characteristic. The method
+   * awaits the completion of the command transmission before resolving, indicating that the update command
+   * has been sent to the device. Note that this method does not wait for the update process on the device to
+   * complete, but merely sends the command to initiate the update.
+   *
+   * @returns {Promise<void>} A promise that resolves when the update command has been sent.
+   */
+  async update(): Promise<void> {
+    await this.send("frame.update()");
   }
 
   /**
@@ -308,6 +383,19 @@ export class Frame {
     })();
   }
 }
+
+/**
+ * Handles cleanup and resource management on process termination signals.
+ *
+ * This section of code listens for SIGINT, SIGQUIT, and SIGTERM signals, which are typically
+ * sent to the process to request its termination. These signals can be triggered by the user
+ * (e.g., pressing Ctrl+C in the terminal) or by the system (e.g., when shutting down). Upon
+ * receiving any of these signals, the code logs a message indicating that an interrupt signal
+ * was caught. It then instructs the `noble` library to stop scanning for Bluetooth Low Energy
+ * (BLE) devices, which is an asynchronous operation. After stopping the scan, it exits the
+ * process cleanly with `process.exit()`, ensuring that no resources are left hanging and that
+ * the application shuts down gracefully.
+ */
 
 process.on("SIGINT", function () {
   console.log("Caught interrupt signal");

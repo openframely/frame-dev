@@ -1,20 +1,36 @@
-type FileEntry = {
+import { Frame } from "frame";
+
+class FileEntry {
   name: string;
   size: number;
-  type: "file" | "directory";
-};
+  type: "directory" | "file";
+
+  constructor(public tuple: string) {
+    const [name, type, size] = tuple.split("|");
+    this.name = name;
+    this.size = parseInt(size);
+    this.type = parseInt(type) === 1 ? "file" : "directory";
+  }
+}
 
 class RemoteFile {
-  private filename: string;
-  private mode: "read" | "write" | "append";
-  private data: string;
   private cursor: number;
+  private data: string;
+  private filename: string;
+  private mode: "append" | "read" | "write";
 
-  constructor(filename: string, mode: "read" | "write" | "append") {
+  constructor(filename: string, mode: "append" | "read" | "write") {
     this.filename = filename;
     this.mode = mode;
     this.data = "";
     this.cursor = 0;
+  }
+
+  /**
+   * Closes the file. It is important to close files once done writing, otherwise they may become corrupted.
+   */
+  close(): void {
+    console.log(`File ${this.filename} closed`);
   }
 
   /**
@@ -44,13 +60,6 @@ class RemoteFile {
     }
     this.data += data;
   }
-
-  /**
-   * Closes the file. It is important to close files once done writing, otherwise they may become corrupted.
-   */
-  close(): void {
-    console.log(`File ${this.filename} closed`);
-  }
 }
 
 /**
@@ -60,9 +69,41 @@ class RemoteFile {
 export class RemoteFileSystem {
   private files: Map<string, FileEntry>;
 
-  constructor() {
+  constructor(public frame: Frame) {
     this.files = new Map<string, FileEntry>();
   }
+
+  /**
+   * Lists all files in the directory path given.
+   * @param directory - The directory path.
+   * @returns An array of file entries in the directory.
+   */
+  async listdir(directory: string): Promise<FileEntry[]> {
+    return (async () => {
+      const listDirCommand = `l=frame.file.listdir('${directory}')`;
+      await this.frame.request(listDirCommand, true);
+
+      const dirSizeCommand = `print(#l)`;
+      const dirSizeResult = await this.frame.request(dirSizeCommand, true);
+      const dirSize = parseInt(dirSizeResult?.toString() || "0");
+      console.log(`Directory ${directory} has ${dirSize} entries`);
+
+      const printContentsCommand = `for k, b in ipairs(l) do print(b['name']..'|'..b['type']..'|'..b['size']..'\\n') end`;
+      const contents = await this.frame.expect(printContentsCommand, dirSize);
+      const fileEntries = [];
+      for (const entry of contents) {
+        const tuple = entry?.trim();
+        if (tuple) fileEntries.push(new FileEntry(tuple));
+      }
+      return fileEntries;
+    })();
+  }
+
+  /**
+   * Creates a new directory with the given pathname.
+   * @param pathname - The path of the new directory.
+   */
+  mkdir(pathname: string): void {}
 
   /**
    * Opens a file and returns a file object.
@@ -70,14 +111,7 @@ export class RemoteFileSystem {
    * @param mode - The mode to open the file in. Can be 'read', 'write', or 'append'.
    * @returns The file object.
    */
-  open(filename: string, mode: "read" | "write" | "append"): RemoteFile {
-    if (!this.files.has(filename) && mode === "read") {
-      throw new Error("File not found");
-    }
-    if (mode === "write" || mode === "append") {
-      this.files.set(filename, {name: filename, size: 0, type: "file"});
-    }
-    console.log(`File ${filename} opened in ${mode} mode`);
+  open(filename: string, mode: "append" | "read" | "write"): RemoteFile {
     return new RemoteFile(filename, mode);
   }
 
@@ -108,34 +142,4 @@ export class RemoteFileSystem {
     this.files.set(newName, entry);
     console.log(`File or directory ${name} renamed to ${newName}`);
   }
-
-  /**
-   * Lists all files in the directory path given.
-   * @param directory - The directory path.
-   * @returns An array of file entries in the directory.
-   */
-  listdir(directory: string): FileEntry[] {
-    // Mock implementation, assuming all files are in root
-    const entries: FileEntry[] = [];
-    this.files.forEach((entry) => {
-      if (directory === "/" || entry.name.startsWith(directory)) {
-        entries.push(entry);
-      }
-    });
-    console.log(`List of files in directory ${directory}:`, entries);
-    return entries;
-  }
-
-  /**
-   * Creates a new directory with the given pathname.
-   * @param pathname - The path of the new directory.
-   */
-  mkdir(pathname: string): void {
-    if (this.files.has(pathname)) {
-      throw new Error("File or directory already exists");
-    }
-    this.files.set(pathname, {name: pathname, size: 0, type: "directory"});
-    console.log(`Directory ${pathname} created`);
-  }
 }
-
