@@ -1,4 +1,11 @@
 {
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "project": [
+      "./tsconfig.json"
+    ],
+    "tsconfigRootDir": "."
+  },
   "extends": [
     "eslint:recommended",
     "plugin:@typescript-eslint/strict",
@@ -78,7 +85,9 @@
         "paths": ["src", "tests"],
         "extensions": [".js", ".jsx", ".ts", ".tsx"]
       },
-      "typescript": {}
+      "typescript": {
+        "project": "./tsconfig.json"
+      }
     }
   },
   "overrides": [
@@ -91,7 +100,8 @@
       "parserOptions": {
         "project": [
           "./tsconfig.json"
-        ]
+        ],
+        "tsconfigRootDir": "."
       }
     },
     {
